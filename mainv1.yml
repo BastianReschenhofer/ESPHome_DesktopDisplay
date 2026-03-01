@@ -1,0 +1,1255 @@
+esphome:
+  name: esphome-zentrale
+  friendly_name: Informationszentrale
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+globals:
+  - id: history_msg
+    type: std::vector<std::string>
+  - id: history_raw_msg
+    type: std::vector<std::string>
+  - id: history_clr
+    type: std::vector<std::string>
+  - id: log_view_index
+    type: int
+    initial_value: '0'
+  - id: stats_view_index
+    type: int
+    initial_value: '0'
+  - id: msg_1
+    type: std::string
+    initial_value: '"Keine Nachricht"'
+  - id: msg_1_clr
+    type: std::string
+    initial_value: '"weiss"'
+  - id: msg_2
+    type: std::string
+    initial_value: '"-"'
+  - id: msg_2_clr
+    type: std::string
+    initial_value: '"weiss"'
+  - id: msg_3
+    type: std::string
+    initial_value: '"-"'
+  - id: msg_3_clr
+    type: std::string
+    initial_value: '"weiss"'
+  - id: frage_aktiv
+    type: bool
+    initial_value: 'false'
+  - id: timer_sekunden
+    type: int
+    initial_value: '0'
+  - id: timer_aktiv
+    type: bool
+    initial_value: 'false'
+  - id: timer_einstell_modus
+    type: bool
+    initial_value: 'false'
+  - id: timer_show_alarm
+    type: bool
+    initial_value: 'false'
+  - id: aktion_index
+    type: int
+    initial_value: '0'
+  - id: timer_menu_modus
+    type: bool
+    initial_value: 'false'
+  - id: timer_menu_index
+    type: int
+    initial_value: '0'
+  - id: anim_tick
+    type: int
+    initial_value: '0'
+  - id: pac_tick
+    type: int
+    initial_value: '0'
+  - id: nav_menu_aktiv
+    type: bool
+    initial_value: 'false'
+  - id: nav_menu_index
+    type: int
+    initial_value: '0'
+  - id: display_timeout_sekunden
+    type: int
+    initial_value: '60'
+  - id: idle_sekunden
+    type: int
+    initial_value: '0'
+  - id: settings_menu_aktiv
+    type: bool
+    initial_value: 'false'
+  - id: settings_menu_index
+    type: int
+    initial_value: '0'
+  - id: einstell_timeout_modus
+    type: bool
+    initial_value: 'false'
+  - id: einstell_night_brt_modus
+    type: bool
+    initial_value: 'false'
+  - id: nachtmodus_helligkeit
+    type: int
+    initial_value: '20'
+  - id: display_leuchtet
+    type: bool
+    initial_value: 'true'
+  - id: red_alarm_active
+    type: bool
+    initial_value: 'false'
+  - id: timer_dimmed
+    type: bool
+    initial_value: 'false'
+  - id: timer_hist_1
+    type: int
+    initial_value: '300'
+  - id: timer_hist_2
+    type: int
+    initial_value: '600'
+  - id: timer_hist_3
+    type: int
+    initial_value: '900'
+
+logger:
+
+script:
+  - id: timer_alarm_sound
+    then:
+      - if:
+          condition:
+            lambda: 'return id(switch_sound).state;'
+          then:
+            - rtttl.play:
+                id: melody_player
+                rtttl: "Alarm:d=4,o=5,b=150:8c6,8p,8c6,8p,8c6,2p,8c6,8p,8c6,8p,8c6,2p,8c6,8p,8c6,8p,8c6"
+                
+  - id: play_red_alarm
+    mode: restart
+    then:
+      - while:
+          condition:
+            lambda: 'return id(red_alarm_active);'
+          then:
+            - rtttl.play: 
+                id: melody_player
+                rtttl: "Wasseralarm:d=4,o=5,b=250:8c6,8e6,8c6,8e6"
+            - delay: 1.5s
+
+api:
+  encryption:
+    key: "F7X1mLgi9mIafPNUypEoFCk+1wwNJDuMYpcVc6zXB8s="
+
+  services:
+    - service: timer_stellen
+      variables:
+        minuten: int
+      then:
+        - lambda: |-
+            id(timer_sekunden) = minuten * 60;
+            id(timer_aktiv) = true;
+            id(timer_einstell_modus) = false;
+            id(timer_show_alarm) = false;
+            
+            int new_val = id(timer_sekunden);
+            if (new_val != id(timer_hist_1)) {
+              if (new_val != id(timer_hist_2)) id(timer_hist_3) = id(timer_hist_2);
+              id(timer_hist_2) = id(timer_hist_1);
+              id(timer_hist_1) = new_val;
+            }
+        - display.page.show: page_timer
+
+    - service: sende_nachricht
+      variables:
+        botschaft: string
+        farbe: string
+      then:
+        - lambda: |-
+            std::string time_str = id(homeassistant_time).now().strftime("%H:%M ");
+            std::string full_msg = time_str + botschaft;
+            
+            id(history_raw_msg).insert(id(history_raw_msg).begin(), botschaft);
+            id(history_msg).insert(id(history_msg).begin(), full_msg);
+            id(history_clr).insert(id(history_clr).begin(), farbe);
+            
+            if(id(history_msg).size() > 10) {
+              id(history_raw_msg).pop_back();
+              id(history_msg).pop_back();
+              id(history_clr).pop_back();
+            }
+            
+            if(id(history_msg).size() > 0) { id(msg_1) = id(history_msg)[0]; id(msg_1_clr) = id(history_clr)[0]; }
+            if(id(history_msg).size() > 1) { id(msg_2) = id(history_msg)[1]; id(msg_2_clr) = id(history_clr)[1]; }
+            if(id(history_msg).size() > 2) { id(msg_3) = id(history_msg)[2]; id(msg_3_clr) = id(history_clr)[2]; }
+            
+            id(log_view_index) = 0;
+            id(frage_aktiv) = false;
+            id(idle_sekunden) = 0;
+            if (id(timer_dimmed)) id(timer_dimmed) = false;
+        
+        - if:
+            condition: { lambda: 'return farbe == "rot";' }
+            then:
+              - lambda: 'id(red_alarm_active) = true;'
+              - script.execute: play_red_alarm
+            else:
+              - if:
+                  condition: { lambda: 'return id(switch_sound).state;' }
+                  then:
+                    - if:
+                        condition: { lambda: 'return farbe == "gelb" && !id(switch_nachtmodus).state;' }
+                        then:
+                          - rtttl.play: 
+                              id: melody_player
+                              rtttl: "Warnung:d=4,o=5,b=100:8e6,8p,8c6"
+                    - if:
+                        condition: { lambda: 'return farbe == "gruen" && !id(switch_nachtmodus).state;' }
+                        then:
+                          - rtttl.play: 
+                              id: melody_player
+                              rtttl: "Post:d=4,o=5,b=150:16e6,16g6,16c7"
+            
+        - display.page.show: page_nachrichten
+        
+        - if:
+            condition: { lambda: 'return id(switch_nachtmodus).state;' }
+            then:
+              - light.turn_on: 
+                  id: display_licht
+                  brightness: !lambda 'return id(nachtmodus_helligkeit) / 100.0f;'
+            else:
+              - light.turn_on: { id: display_licht, brightness: 100% }
+
+ota:
+  - platform: esphome
+    password: "DEIN_OTA_PASSWORT"
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+time:
+  - platform: homeassistant
+    id: homeassistant_time
+    on_time:
+      - seconds: 0
+        minutes: 0
+        hours: 22
+        then:
+          - if:
+              condition: { lambda: 'return id(switch_automatik).state;' }
+              then:
+                - switch.turn_on: switch_nachtmodus
+                - if:
+                    condition: { lambda: 'return id(display_leuchtet) && !id(timer_dimmed);' }
+                    then:
+                      - light.turn_on: 
+                          id: display_licht
+                          brightness: !lambda 'return id(nachtmodus_helligkeit) / 100.0f;'
+      - seconds: 0
+        minutes: 0
+        hours: 7
+        then:
+          - if:
+              condition: { lambda: 'return id(switch_automatik).state;' }
+              then:
+                - switch.turn_off: switch_nachtmodus
+                - if:
+                    condition: { lambda: 'return id(display_leuchtet) && !id(timer_dimmed);' }
+                    then:
+                      - light.turn_on: {id: display_licht, brightness: 100%}
+
+switch:
+  - platform: template
+    name: "Zentrale Töne"
+    id: switch_sound
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+
+  - platform: template
+    name: "Nachtmodus Automatik"
+    id: switch_automatik
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    
+  - platform: template
+    name: "Nachtmodus"
+    id: switch_nachtmodus
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - if:
+          condition: { lambda: 'return id(display_leuchtet) && !id(timer_dimmed);' }
+          then:
+            - light.turn_on: 
+                id: display_licht
+                brightness: !lambda 'return id(nachtmodus_helligkeit) / 100.0f;'
+    on_turn_off:
+      - if:
+          condition: { lambda: 'return id(display_leuchtet) && !id(timer_dimmed);' }
+          then:
+            - light.turn_on: {id: display_licht, brightness: 100%}
+
+text_sensor:
+  - platform: homeassistant
+    id: wetter_bedingung
+    entity_id: weather.forecast_home
+    internal: true
+
+sensor:
+  - platform: wifi_signal
+    id: wlan_starke
+    update_interval: 60s
+    internal: true
+  - platform: homeassistant
+    id: zimmer_temperatur
+    entity_id: sensor.esphome_zimmer_zimmer_temperatur
+    internal: true
+  - platform: homeassistant
+    id: zimmer_luftfeuchtigkeit
+    entity_id: sensor.esphome_zimmer_zimmer_luftfeuchtigkeit
+    internal: true
+  - platform: homeassistant
+    id: aussen_temperatur
+    entity_id: sensor.esphome_aussentemp_aussentemperatur
+    internal: true
+  - platform: homeassistant
+    id: aussen_luftfeuchtigkeit
+    entity_id: sensor.esphome_aussentemp_luftfeuchtigkeit_aussen
+    internal: true
+
+  - platform: rotary_encoder
+    id: encoder
+    pin_a: 25
+    pin_b: 26
+    on_clockwise:
+      - if:
+          condition:
+            lambda: 'return !id(display_leuchtet) || id(timer_dimmed);'
+          then:
+            - lambda: 'id(idle_sekunden) = 0; id(timer_dimmed) = false;'
+            - if:
+                condition: { lambda: 'return id(switch_nachtmodus).state;' }
+                then: { light.turn_on: {id: display_licht, brightness: !lambda 'return id(nachtmodus_helligkeit) / 100.0f;'} }
+                else: { light.turn_on: {id: display_licht, brightness: 100%} }
+          else:
+            - lambda: |-
+                id(idle_sekunden) = 0;
+                if (id(nav_menu_aktiv)) {
+                  id(nav_menu_index)--; if(id(nav_menu_index) < 0) id(nav_menu_index) = 6;
+                } else if (id(tft_display).get_active_page() == id(page_nachrichten)) {
+                  if (id(history_raw_msg).size() > 0) {
+                    if (id(log_view_index) == 0) id(log_view_index) = (int)id(history_raw_msg).size() - 1;
+                    else id(log_view_index)--;
+                  }
+                } else if (id(tft_display).get_active_page() == id(page_sensoren)) {
+                  id(stats_view_index)++; if(id(stats_view_index) > 1) id(stats_view_index) = 0;
+                } else if (id(tft_display).get_active_page() == id(page_sysinfo)) {
+                  // Kein Scrollen auf der Sysinfo Seite
+                } else if (id(settings_menu_aktiv)) {
+                  if (id(einstell_timeout_modus)) {
+                    if (id(display_timeout_sekunden) == 0) id(display_timeout_sekunden) = 300;
+                    else id(display_timeout_sekunden) -= 10;
+                    if (id(display_timeout_sekunden) < 0) id(display_timeout_sekunden) = 0;
+                  } else if (id(einstell_night_brt_modus)) {
+                    id(nachtmodus_helligkeit) -= 10;
+                    if (id(nachtmodus_helligkeit) < 10) id(nachtmodus_helligkeit) = 10;
+                    if (id(switch_nachtmodus).state) {
+                      auto call = id(display_licht)->turn_on();
+                      call.set_brightness(id(nachtmodus_helligkeit) / 100.0f);
+                      call.perform();
+                    }
+                  } else {
+                    id(settings_menu_index)--; if(id(settings_menu_index) < 0) id(settings_menu_index) = 5;
+                  }
+                } else if (id(timer_menu_modus)) {
+                  int max_idx = (id(timer_sekunden) > 0) ? 3 : 4;
+                  id(timer_menu_index)--; if(id(timer_menu_index) < 0) id(timer_menu_index) = max_idx;
+                } else if (id(timer_einstell_modus)) {
+                  if(id(timer_sekunden) >= 60) id(timer_sekunden) -= 60;
+                } else if (id(tft_display).get_active_page() == id(page_aktionen)) {
+                  id(aktion_index)--; if(id(aktion_index) < 0) id(aktion_index) = 4;
+                }
+    on_anticlockwise:
+      - if:
+          condition:
+            lambda: 'return !id(display_leuchtet) || id(timer_dimmed);'
+          then:
+            - lambda: 'id(idle_sekunden) = 0; id(timer_dimmed) = false;'
+            - if:
+                condition: { lambda: 'return id(switch_nachtmodus).state;' }
+                then: { light.turn_on: {id: display_licht, brightness: !lambda 'return id(nachtmodus_helligkeit) / 100.0f;'} }
+                else: { light.turn_on: {id: display_licht, brightness: 100%} }
+          else:
+            - lambda: |-
+                id(idle_sekunden) = 0;
+                if (id(nav_menu_aktiv)) {
+                  id(nav_menu_index)++; if(id(nav_menu_index) > 6) id(nav_menu_index) = 0;
+                } else if (id(tft_display).get_active_page() == id(page_nachrichten)) {
+                  if (id(history_raw_msg).size() > 0) {
+                    id(log_view_index)++;
+                    if (id(log_view_index) >= (int)id(history_raw_msg).size()) id(log_view_index) = 0;
+                  }
+                } else if (id(tft_display).get_active_page() == id(page_sensoren)) {
+                  id(stats_view_index)--; if(id(stats_view_index) < 0) id(stats_view_index) = 1;
+                } else if (id(tft_display).get_active_page() == id(page_sysinfo)) {
+                  // Kein Scrollen auf der Sysinfo Seite
+                } else if (id(settings_menu_aktiv)) {
+                  if (id(einstell_timeout_modus)) {
+                    id(display_timeout_sekunden) += 10;
+                    if (id(display_timeout_sekunden) > 300) id(display_timeout_sekunden) = 0;
+                  } else if (id(einstell_night_brt_modus)) {
+                    id(nachtmodus_helligkeit) += 10;
+                    if (id(nachtmodus_helligkeit) > 100) id(nachtmodus_helligkeit) = 100;
+                    if (id(switch_nachtmodus).state) {
+                      auto call = id(display_licht)->turn_on();
+                      call.set_brightness(id(nachtmodus_helligkeit) / 100.0f);
+                      call.perform();
+                    }
+                  } else {
+                    id(settings_menu_index)++; if(id(settings_menu_index) > 5) id(settings_menu_index) = 0;
+                  }
+                } else if (id(timer_menu_modus)) {
+                  int max_idx = (id(timer_sekunden) > 0) ? 3 : 4;
+                  id(timer_menu_index)++; if(id(timer_menu_index) > max_idx) id(timer_menu_index) = 0;
+                } else if (id(timer_einstell_modus)) {
+                  id(timer_sekunden) += 60;
+                } else if (id(tft_display).get_active_page() == id(page_aktionen)) {
+                  id(aktion_index)++; if(id(aktion_index) > 4) id(aktion_index) = 0;
+                }
+
+font:
+  - file: "gfonts://Roboto"
+    id: font_tiny
+    size: 10
+  - file: "gfonts://Roboto"
+    id: font_normal
+    size: 12
+  - file: "gfonts://Roboto"
+    id: font_medium
+    size: 16
+  - file: "gfonts://Roboto"
+    id: font_uhr
+    size: 26
+
+spi:
+  clk_pin: 18
+  mosi_pin: 23
+
+output:
+  - platform: ledc
+    pin: 32
+    id: tft_backlight
+  - platform: ledc
+    pin: 19
+    id: buzzer_pwm
+
+rtttl:
+  output: buzzer_pwm
+  id: melody_player
+
+light:
+  - platform: monochromatic
+    output: tft_backlight
+    name: "Display Backlight"
+    id: display_licht
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      - globals.set: {id: display_leuchtet, value: 'true'}
+    on_turn_off:
+      - globals.set: {id: display_leuchtet, value: 'false'}
+
+display:
+  - platform: st7735
+    model: "INITR_BLACKTAB"
+    device_width: 128
+    device_height: 160
+    col_start: 0
+    row_start: 0
+    reset_pin: 4
+    cs_pin: 5
+    dc_pin: 2
+    rotation: 0
+    id: tft_display
+    pages:
+      - id: page_home
+        lambda: |-
+          it.fill(Color(0, 0, 0));
+          
+          if (id(homeassistant_time).now().is_valid()) {
+            it.strftime(64, 4, id(font_uhr), Color(255, 255, 0), TextAlign::TOP_CENTER, "%H:%M", id(homeassistant_time).now());
+            it.strftime(64, 32, id(font_tiny), Color(0, 255, 255), TextAlign::TOP_CENTER, "%d.%m.%Y", id(homeassistant_time).now());
+          } else {
+            it.print(64, 4, id(font_uhr), Color(150, 150, 150), TextAlign::TOP_CENTER, "--:--");
+          }
+
+          Color ui_color = Color(255, 0, 0);
+          int cycle = (id(anim_tick) / 10) % 3;
+          if(cycle == 1) ui_color = Color(0, 255, 0);
+          if(cycle == 2) ui_color = Color(0, 0, 255);
+          it.line(4, 46, 124, 46, ui_color);
+
+          it.print(4, 52, id(font_tiny), Color(255, 0, 255), TextAlign::TOP_LEFT, "SYS.DAT");
+          
+          if (id(zimmer_temperatur).has_state() && id(zimmer_luftfeuchtigkeit).has_state()) {
+            it.printf(4, 66, id(font_tiny), Color(255, 255, 255), "IN: %.1fC  %.0f%%", id(zimmer_temperatur).state, id(zimmer_luftfeuchtigkeit).state);
+          } else {
+            it.print(4, 66, id(font_tiny), Color(100, 100, 100), TextAlign::TOP_LEFT, "IN: OFFLINE");
+          }
+
+          if (id(aussen_temperatur).has_state()) {
+            it.printf(4, 80, id(font_tiny), Color(255, 255, 255), "OUT: %.1fC", id(aussen_temperatur).state);
+          } else {
+            it.print(4, 80, id(font_tiny), Color(100, 100, 100), TextAlign::TOP_LEFT, "OUT: OFFLINE");
+          }
+
+          auto draw_invader = [&](int x, int y, Color c, bool frame) {
+              it.filled_rectangle(x+4, y, 8, 2, c);
+              it.filled_rectangle(x+2, y+2, 12, 2, c);
+              it.filled_rectangle(x, y+4, 16, 2, c);
+              it.filled_rectangle(x, y+6, 4, 2, c); it.filled_rectangle(x+6, y+6, 4, 2, c); it.filled_rectangle(x+12, y+6, 4, 2, c);
+              it.filled_rectangle(x, y+8, 16, 2, c);
+              it.filled_rectangle(x+4, y+10, 8, 2, c);
+              if(frame) {
+                  it.filled_rectangle(x, y+12, 4, 2, c); it.filled_rectangle(x+12, y+12, 4, 2, c);
+              } else {
+                  it.filled_rectangle(x+2, y+12, 4, 2, c); it.filled_rectangle(x+10, y+12, 4, 2, c);
+              }
+          };
+          
+          int inv_y = 56 + ((id(anim_tick) / 5) % 4);
+          draw_invader(100, inv_y, Color(0, 255, 0), (id(anim_tick) / 4) % 2 == 0);
+
+          it.line(4, 98, 124, 98, ui_color);
+          
+          auto get_clr = [&](std::string c) {
+            if(c == "rot") return Color(255, 0, 0);
+            if(c == "gelb") return Color(255, 255, 0);
+            if(c == "gruen") return Color(0, 255, 0);
+            return Color(150, 150, 150);
+          };
+          
+          it.printf(4, 104, id(font_tiny), get_clr(id(msg_1_clr)), "> %.16s", id(msg_1).c_str());
+          it.printf(4, 118, id(font_tiny), get_clr(id(msg_2_clr)), "> %.16s", id(msg_2).c_str());
+          it.printf(4, 132, id(font_tiny), get_clr(id(msg_3_clr)), "> %.16s", id(msg_3).c_str());
+          
+          if (id(timer_aktiv) || id(timer_sekunden) > 0) {
+            int m = id(timer_sekunden) / 60;
+            int s = id(timer_sekunden) % 60;
+            it.printf(4, 146, id(font_tiny), Color(255, 165, 0), TextAlign::TOP_LEFT, "TMR %02d:%02d", m, s);
+          }
+          
+          if (id(switch_nachtmodus).state) {
+            it.print(124, 146, id(font_tiny), Color(100, 150, 255), TextAlign::TOP_RIGHT, "Zzz");
+          } else {
+            if ((id(anim_tick) / 6) % 2 == 0) {
+              it.print(124, 146, id(font_tiny), Color(0, 255, 0), TextAlign::TOP_RIGHT, "READY");
+            }
+          }
+
+      - id: page_nav
+        lambda: |-
+          it.fill(Color(0, 0, 0));
+          
+          it.rectangle(0, 0, 128, 160, Color(0, 0, 255));
+          it.rectangle(2, 2, 124, 156, Color(0, 0, 255));
+          
+          it.print(64, 10, id(font_normal), Color(255, 0, 0), TextAlign::TOP_CENTER, "- MAIN MENU -");
+
+          auto draw_ship = [&](int x, int y, Color c) {
+              it.filled_rectangle(x, y-2, 2, 4, c);
+              it.filled_rectangle(x+2, y-4, 2, 8, c);
+              it.filled_rectangle(x+4, y-6, 4, 12, c);
+              it.filled_rectangle(x+8, y-2, 2, 4, c);
+          };
+
+          const char* pages[7] = {"HOME", "LOGS", "STATS", "TIMER", "CONTROL", "SETTINGS", "ZURUECK"};
+          for(int i=0; i<7; i++) {
+            int y = 35 + (i * 16);
+            if(id(nav_menu_index) == i) {
+              draw_ship(14, y + 6, Color(255, 255, 0));
+              
+              Color blink_color = ((id(anim_tick) / 3) % 2 == 0) ? Color(255, 255, 0) : Color(255, 255, 255);
+              it.print(32, y, id(font_tiny), blink_color, TextAlign::TOP_LEFT, pages[i]);
+            } else {
+              it.print(32, y, id(font_tiny), Color(0, 255, 0), TextAlign::TOP_LEFT, pages[i]);
+            }
+          }
+
+      - id: page_settings
+        lambda: |-
+          it.fill(Color(0, 0, 0));
+          
+          it.rectangle(0, 0, 128, 160, Color(0, 255, 255));
+          it.rectangle(2, 2, 124, 156, Color(0, 255, 255));
+          
+          it.print(64, 10, id(font_normal), Color(255, 0, 255), TextAlign::TOP_CENTER, "SETTINGS");
+
+          auto draw_pacman = [&](int y) {
+            int px = 16; int py = y + 5;
+            it.filled_circle(px, py, 4, Color(255, 255, 0));
+            if ((id(anim_tick)/2)%2 == 0) {
+              it.filled_triangle(px, py, px+6, py-4, px+6, py+4, Color(0,0,0));
+            }
+          };
+
+          Color c[6];
+          for(int i=0; i<6; i++) {
+             c[i] = (id(settings_menu_index) == i) ? (((id(anim_tick) / 3) % 2 == 0) ? Color(255, 255, 0) : Color(255, 255, 255)) : Color(0, 255, 0);
+          }
+
+          if(id(settings_menu_index) == 0) draw_pacman(35);
+          it.printf(28, 35, id(font_tiny), c[0], "SOUND: %s", id(switch_sound).state ? "ON" : "OFF");
+
+          if(id(settings_menu_index) == 1) draw_pacman(55);
+          if(id(einstell_timeout_modus)) {
+             it.printf(28, 55, id(font_tiny), Color(255,0,0), "[ T-OUT: %ds ]", id(display_timeout_sekunden));
+          } else {
+             if (id(display_timeout_sekunden) == 0) {
+                it.print(28, 55, id(font_tiny), c[1], TextAlign::TOP_LEFT, "T-OUT: NEVER");
+             } else {
+                it.printf(28, 55, id(font_tiny), c[1], "T-OUT: %ds", id(display_timeout_sekunden));
+             }
+          }
+          
+          if(id(settings_menu_index) == 2) draw_pacman(75);
+          it.printf(28, 75, id(font_tiny), c[2], "NIGHT: %s", id(switch_nachtmodus).state ? "ON" : "OFF");
+
+          if(id(settings_menu_index) == 3) draw_pacman(95);
+          if(id(einstell_night_brt_modus)) {
+             it.printf(28, 95, id(font_tiny), Color(255,0,0), "[ N-BRT: %d%% ]", id(nachtmodus_helligkeit));
+          } else {
+             it.printf(28, 95, id(font_tiny), c[3], "N-BRT: %d%%", id(nachtmodus_helligkeit));
+          }
+
+          if(id(settings_menu_index) == 4) draw_pacman(115);
+          it.print(28, 115, id(font_tiny), c[4], TextAlign::TOP_LEFT, "SYS INFO");
+
+          if(id(settings_menu_index) == 5) draw_pacman(135);
+          it.print(28, 135, id(font_tiny), c[5], TextAlign::TOP_LEFT, "ZURUECK");
+
+      - id: page_sysinfo
+        lambda: |-
+          it.fill(Color(0, 0, 0));
+          
+          it.rectangle(0, 0, 128, 160, Color(255, 255, 0));
+          it.rectangle(2, 2, 124, 156, Color(255, 255, 0));
+          
+          it.print(64, 10, id(font_normal), Color(0, 255, 0), TextAlign::TOP_CENTER, "DIAGNOSTICS");
+          
+          it.print(14, 40, id(font_tiny), Color(255, 255, 255), TextAlign::TOP_LEFT, "WIFI SIGNAL:");
+          
+          if (id(wlan_starke).has_state()) {
+              float sig = id(wlan_starke).state;
+              it.printf(14, 55, id(font_medium), Color(0, 255, 255), "%.0f dBm", sig);
+              
+              int bars = (sig + 100) / 10;
+              if (bars < 0) bars = 0; 
+              if (bars > 5) bars = 5;
+              
+              for (int i = 0; i < 5; i++) {
+                  Color bar_color = (i < bars) ? Color(0, 255, 0) : Color(50, 50, 50);
+                  it.filled_rectangle(14 + (i * 12), 95 - (i * 5), 8, 5 + (i * 5), bar_color);
+              }
+          } else {
+              it.print(14, 55, id(font_medium), Color(255, 0, 0), TextAlign::TOP_LEFT, "OFFLINE");
+          }
+
+          if ((id(anim_tick) / 4) % 2 == 0) {
+             it.print(64, 135, id(font_tiny), Color(255, 0, 0), TextAlign::TOP_CENTER, "PRESS TO RETURN");
+          }
+
+      - id: page_nachrichten
+        lambda: |-
+          Color bc = Color(0, 0, 255);
+          std::string clr = "weiss";
+          std::string msg = "KEINE NACHRICHTEN";
+          
+          if (id(history_raw_msg).size() > 0) {
+            clr = id(history_clr)[id(log_view_index)];
+            msg = id(history_raw_msg)[id(log_view_index)];
+          }
+          
+          if(clr == "rot") bc = Color(255, 0, 0);
+          else if(clr == "gelb") bc = Color(255, 255, 0);
+          else if(clr == "gruen") bc = Color(0, 255, 0);
+          
+          it.fill(Color(0, 0, 0));
+          
+          if ((id(anim_tick) / 5) % 2 == 0) {
+            it.rectangle(2, 2, 124, 156, bc);
+            it.rectangle(4, 4, 120, 152, bc);
+          } else {
+            it.rectangle(3, 3, 122, 154, bc);
+          }
+          
+          it.filled_rectangle(10, 10, 108, 18, bc);
+          Color text_color = (clr == "gelb" || clr == "gruen") ? Color(0,0,0) : Color(255,255,255);
+          
+          if (id(history_raw_msg).size() > 0) {
+            it.printf(64, 12, id(font_normal), text_color, TextAlign::TOP_CENTER, "MSG %d/%d", id(log_view_index) + 1, id(history_raw_msg).size());
+          } else {
+            it.print(64, 12, id(font_normal), text_color, TextAlign::TOP_CENTER, "LOGS");
+          }
+          
+          int line_len = 16; 
+          int y_offset = 35;
+          for (size_t i = 0; i < msg.length(); i += line_len) {
+            it.print(64, y_offset, id(font_normal), Color(255,255,255), TextAlign::TOP_CENTER, msg.substr(i, line_len).c_str());
+            y_offset += 16;
+          }
+          
+          if (id(red_alarm_active)) {
+             if ((id(anim_tick) / 4) % 2 == 0) {
+                it.print(64, 140, id(font_tiny), bc, TextAlign::TOP_CENTER, "PRESS TO ACKNOWLEDGE");
+             }
+          } else {
+             if ((id(anim_tick) / 4) % 2 == 0) {
+                it.print(64, 140, id(font_tiny), bc, TextAlign::TOP_CENTER, "PRESS TO EXIT");
+             }
+          }
+
+      - id: page_sensoren
+        lambda: |-
+          it.fill(Color(0, 0, 0));
+          it.print(64, 10, id(font_normal), Color(255, 255, 0), TextAlign::TOP_CENTER, "PLAYER STATS");
+
+          if (id(stats_view_index) == 0) {
+            if ((id(anim_tick) / 4) % 2 == 0) {
+              it.filled_triangle(120, 10, 115, 5, 115, 15, Color(255, 255, 0));
+            }
+
+            auto draw_invader = [&](int x, int y, Color c, bool frame) {
+                it.filled_rectangle(x+4, y, 8, 2, c);
+                it.filled_rectangle(x+2, y+2, 12, 2, c);
+                it.filled_rectangle(x, y+4, 16, 2, c);
+                it.filled_rectangle(x, y+6, 4, 2, c); it.filled_rectangle(x+6, y+6, 4, 2, c); it.filled_rectangle(x+12, y+6, 4, 2, c);
+                it.filled_rectangle(x, y+8, 16, 2, c);
+                it.filled_rectangle(x+4, y+10, 8, 2, c);
+                if(frame) {
+                    it.filled_rectangle(x, y+12, 4, 2, c); it.filled_rectangle(x+12, y+12, 4, 2, c);
+                } else {
+                    it.filled_rectangle(x+2, y+12, 4, 2, c); it.filled_rectangle(x+10, y+12, 4, 2, c);
+                }
+            };
+
+            it.rectangle(4, 30, 120, 50, Color(255, 0, 0));
+            draw_invader(10, 34, Color(255, 0, 0), (id(anim_tick)/4)%2==0);
+            
+            int laser_y = 48 + ((id(anim_tick) * 3) % 40);
+            it.filled_rectangle(14, laser_y, 2, 4, Color(255, 0, 0));
+
+            it.print(32, 36, id(font_tiny), Color(255, 255, 0), TextAlign::TOP_LEFT, "STAGE 1: INNEN");
+            
+            if (id(zimmer_temperatur).has_state()) {
+              it.printf(32, 54, id(font_medium), Color(255,255,255), "%.1f C", id(zimmer_temperatur).state);
+            } else { it.print(32, 54, id(font_medium), Color(100,100,100), "ERR C"); }
+            if (id(zimmer_luftfeuchtigkeit).has_state()) {
+              it.printf(85, 54, id(font_medium), Color(0,255,0), "%.0f %%", id(zimmer_luftfeuchtigkeit).state);
+            } else { it.print(85, 54, id(font_medium), Color(100,100,100), "ERR %"); }
+
+            it.rectangle(4, 90, 120, 50, Color(0, 0, 255));
+            draw_invader(10, 94, Color(0, 0, 255), (id(anim_tick)/4)%2!=0);
+
+            int laser2_y = 108 + ((id(anim_tick) * 3) % 40);
+            it.filled_rectangle(14, laser2_y, 2, 4, Color(0, 0, 255));
+
+            it.print(32, 96, id(font_tiny), Color(255, 255, 0), TextAlign::TOP_LEFT, "STAGE 2: AUSSEN");
+            
+            if (id(aussen_temperatur).has_state()) {
+              it.printf(32, 114, id(font_medium), Color(255,255,255), "%.1f C", id(aussen_temperatur).state);
+            } else { it.print(32, 114, id(font_medium), Color(100,100,100), "ERR C"); }
+            if (id(aussen_luftfeuchtigkeit).has_state()) {
+              it.printf(85, 114, id(font_medium), Color(0,255,0), "%.0f %%", id(aussen_luftfeuchtigkeit).state);
+            } else { it.print(85, 114, id(font_medium), Color(100,100,100), "ERR %"); }
+          } else {
+            if ((id(anim_tick) / 4) % 2 == 0) {
+              it.filled_triangle(8, 10, 13, 5, 13, 15, Color(255, 255, 0));
+            }
+            
+            it.print(64, 30, id(font_tiny), Color(0, 255, 255), TextAlign::TOP_CENTER, "STAGE 3: WETTER RADAR");
+            
+            std::string cond = id(wetter_bedingung).has_state() ? id(wetter_bedingung).state : "unknown";
+            int cx = 64;
+            int cy = 75;
+            
+            if (cond == "sunny" || cond == "clear-night") {
+                it.filled_circle(cx, cy, 14, Color(255, 255, 0));
+                if ((id(anim_tick) / 2) % 2 == 0) {
+                    it.line(cx, cy - 18, cx, cy - 24, Color(255, 255, 0));
+                    it.line(cx, cy + 18, cx, cy + 24, Color(255, 255, 0));
+                    it.line(cx - 18, cy, cx - 24, cy, Color(255, 255, 0));
+                    it.line(cx + 18, cy, cx + 24, cy, Color(255, 255, 0));
+                } else {
+                    it.line(cx - 13, cy - 13, cx - 18, cy - 18, Color(255, 255, 0));
+                    it.line(cx + 13, cy + 13, cx + 18, cy + 18, Color(255, 255, 0));
+                    it.line(cx + 13, cy - 13, cx + 18, cy - 18, Color(255, 255, 0));
+                    it.line(cx - 13, cy + 13, cx - 18, cy + 18, Color(255, 255, 0));
+                }
+                it.print(64, 115, id(font_medium), Color(255, 255, 0), TextAlign::TOP_CENTER, "KLAR");
+            } else if (cond == "rainy" || cond == "pouring" || cond == "lightning-rainy") {
+                it.filled_circle(cx - 12, cy, 12, Color(100, 100, 100));
+                it.filled_circle(cx + 12, cy, 12, Color(100, 100, 100));
+                it.filled_circle(cx, cy - 8, 15, Color(100, 100, 100));
+                
+                int drop = (id(anim_tick) * 4) % 20;
+                it.line(cx - 10, cy + 10 + drop, cx - 12, cy + 15 + drop, Color(0, 150, 255));
+                it.line(cx, cy + 5 + drop, cx - 2, cy + 10 + drop, Color(0, 150, 255));
+                it.line(cx + 10, cy + 10 + drop, cx + 8, cy + 15 + drop, Color(0, 150, 255));
+                
+                if (cond == "lightning-rainy" && (id(anim_tick) / 3) % 4 == 0) {
+                   it.filled_triangle(cx, cy+5, cx+5, cy+15, cx-5, cy+15, Color(255,255,0));
+                   it.filled_triangle(cx+2, cy+10, cx+7, cy+25, cx-3, cy+15, Color(255,255,0));
+                }
+                it.print(64, 115, id(font_medium), Color(0, 150, 255), TextAlign::TOP_CENTER, "REGEN");
+            } else if (cond == "cloudy" || cond == "partlycloudy" || cond == "fog") {
+                int drift = ((id(anim_tick) / 2) % 10) - 5;
+                int px = cx + drift;
+                it.filled_circle(px - 12, cy, 12, Color(200, 200, 200));
+                it.filled_circle(px + 12, cy, 12, Color(200, 200, 200));
+                it.filled_circle(px, cy - 8, 15, Color(200, 200, 200));
+                it.print(64, 115, id(font_medium), Color(200, 200, 200), TextAlign::TOP_CENTER, "WOLKIG");
+            } else if (cond == "snowy" || cond == "snowy-rainy") {
+                it.filled_circle(cx - 12, cy, 12, Color(255, 255, 255));
+                it.filled_circle(cx + 12, cy, 12, Color(255, 255, 255));
+                it.filled_circle(cx, cy - 8, 15, Color(255, 255, 255));
+                
+                int drop = (id(anim_tick) * 2) % 20;
+                it.filled_rectangle(cx - 10, cy + 10 + drop, 2, 2, Color(0, 255, 255));
+                it.filled_rectangle(cx, cy + 5 + drop, 2, 2, Color(0, 255, 255));
+                it.filled_rectangle(cx + 10, cy + 10 + drop, 2, 2, Color(0, 255, 255));
+                it.print(64, 115, id(font_medium), Color(0, 255, 255), TextAlign::TOP_CENTER, "SCHNEE");
+            } else {
+                it.print(64, cy, id(font_medium), Color(255, 0, 0), TextAlign::CENTER, "NO SIGNAL");
+            }
+          }
+
+      - id: page_timer
+        lambda: |-
+          it.fill(Color(0, 0, 0));
+          it.print(64, 20, id(font_normal), Color(0, 255, 0), TextAlign::TOP_CENTER, "TIME LIMIT");
+          
+          auto draw_pacman_menu = [&](int y) {
+            int px = 18; int py = y + 5;
+            it.filled_circle(px, py, 4, Color(255, 255, 0));
+            if ((id(anim_tick)/2)%2 == 0) {
+              it.filled_triangle(px, py, px+6, py-4, px+6, py+4, Color(0,0,0));
+            }
+          };
+
+          if (id(timer_menu_modus)) {
+            if (id(timer_sekunden) > 0) {
+              Color c0 = id(timer_menu_index) == 0 ? Color(255, 255, 255) : Color(0, 255, 0);
+              Color c1 = id(timer_menu_index) == 1 ? Color(255, 255, 255) : Color(0, 255, 0);
+              Color c2 = id(timer_menu_index) == 2 ? Color(255, 255, 255) : Color(0, 255, 0);
+              Color c3 = id(timer_menu_index) == 3 ? Color(255, 255, 255) : Color(0, 255, 0);
+              if (id(timer_menu_index) == 0) draw_pacman_menu(40); it.print(30, 40, id(font_tiny), c0, TextAlign::TOP_LEFT, "WEITER");
+              if (id(timer_menu_index) == 1) draw_pacman_menu(60); it.print(30, 60, id(font_tiny), c1, TextAlign::TOP_LEFT, "NEU STELLEN");
+              if (id(timer_menu_index) == 2) draw_pacman_menu(80); it.print(30, 80, id(font_tiny), c2, TextAlign::TOP_LEFT, "ABBRECHEN");
+              if (id(timer_menu_index) == 3) draw_pacman_menu(100); it.print(30, 100, id(font_tiny), c3, TextAlign::TOP_LEFT, "ZURUECK");
+            } else {
+              Color c[5];
+              for(int i=0; i<5; i++) c[i] = id(timer_menu_index) == i ? Color(255,255,255) : Color(0,255,0);
+              if (id(timer_menu_index) == 0) draw_pacman_menu(35); it.print(30, 35, id(font_tiny), c[0], TextAlign::TOP_LEFT, "NEU STELLEN");
+              if (id(timer_menu_index) == 1) draw_pacman_menu(55); it.printf(30, 55, id(font_tiny), c[1], "%02d:%02d LADEN", id(timer_hist_1)/60, id(timer_hist_1)%60);
+              if (id(timer_menu_index) == 2) draw_pacman_menu(75); it.printf(30, 75, id(font_tiny), c[2], "%02d:%02d LADEN", id(timer_hist_2)/60, id(timer_hist_2)%60);
+              if (id(timer_menu_index) == 3) draw_pacman_menu(95); it.printf(30, 95, id(font_tiny), c[3], "%02d:%02d LADEN", id(timer_hist_3)/60, id(timer_hist_3)%60);
+              if (id(timer_menu_index) == 4) draw_pacman_menu(115); it.print(30, 115, id(font_tiny), c[4], TextAlign::TOP_LEFT, "ZURUECK");
+            }
+          } else {
+            int m = id(timer_sekunden) / 60;
+            int s = id(timer_sekunden) % 60;
+            Color clr = Color(255, 255, 255);
+            std::string status = "STANDBY";
+            if (id(timer_show_alarm)) { clr = Color(255, 0, 0); status = "TIME OVER"; }
+            else if (id(timer_einstell_modus)) { clr = Color(255, 255, 0); status = "INSERT COIN"; }
+            else if (id(timer_aktiv)) { clr = Color(0, 255, 0); status = "PLAYER 1 START"; }
+            else if (!id(timer_aktiv) && id(timer_sekunden) > 0) { clr = Color(255, 0, 0); status = "PAUSED"; }
+            
+            it.printf(64, 65, id(font_uhr), clr, TextAlign::CENTER, "%02d:%02d", m, s);
+            
+            if (!id(timer_aktiv) && id(timer_sekunden) > 0 && ((id(anim_tick)/5)%2 == 0)) {
+            } else {
+               it.print(64, 105, id(font_tiny), clr, TextAlign::CENTER, status.c_str());
+            }
+          }
+
+          if (!id(timer_dimmed) && (id(timer_sekunden) > 0 || id(timer_aktiv))) {
+            int p = (id(pac_tick) * 4) % 512;
+            int px, py, dir; 
+            
+            if (p < 112) { px = 8 + p; py = 8; dir = 0; }
+            else if (p < 256) { px = 120; py = 8 + (p - 112); dir = 1; }
+            else if (p < 368) { px = 120 - (p - 256); py = 152; dir = 2; }
+            else { px = 8; py = 152 - (p - 368); dir = 3; }
+
+            for (int i = 0; i < 512; i += 32) {
+                if (i > p) {
+                    int dx, dy;
+                    if (i < 112) { dx = 8 + i; dy = 8; }
+                    else if (i < 256) { dx = 120; dy = 8 + (i - 112); }
+                    else if (i < 368) { dx = 120 - (i - 256); dy = 152; }
+                    else { dx = 8; dy = 152 - (i - 368); }
+
+                    if (i == 160 || i == 416) {
+                        it.filled_circle(dx, dy, 2, Color(255, 0, 0));
+                        it.line(dx, dy, dx+3, dy-3, Color(0, 255, 0)); 
+                    } else {
+                        it.filled_rectangle(dx-1, dy-1, 2, 2, Color(255, 200, 0));
+                    }
+                }
+            }
+
+            bool mouth_open = (id(pac_tick) / 2) % 2 == 0;
+            it.filled_circle(px, py, 6, Color(255, 255, 0));
+            if (mouth_open) {
+               if(dir==0) it.filled_triangle(px, py, px+8, py-6, px+8, py+6, Color(0,0,0));
+               if(dir==1) it.filled_triangle(px, py, px-6, py+8, px+6, py+8, Color(0,0,0));
+               if(dir==2) it.filled_triangle(px, py, px-8, py-6, px-8, py+6, Color(0,0,0));
+               if(dir==3) it.filled_triangle(px, py, px-6, py-8, px+6, py-8, Color(0,0,0));
+            }
+          }
+
+      - id: page_aktionen
+        lambda: |-
+          it.fill(Color(0, 0, 0));
+          
+          it.rectangle(0, 0, 128, 160, Color(255, 0, 0));
+          it.rectangle(2, 2, 124, 156, Color(255, 0, 0));
+          
+          it.print(64, 10, id(font_normal), Color(255, 255, 0), TextAlign::TOP_CENTER, "ACTION MENU");
+
+          auto draw_ship = [&](int x, int y, Color c) {
+              it.filled_rectangle(x, y-2, 2, 4, c);
+              it.filled_rectangle(x+2, y-4, 2, 8, c);
+              it.filled_rectangle(x+4, y-6, 4, 12, c);
+              it.filled_rectangle(x+8, y-2, 2, 4, c);
+          };
+
+          const char* actions[5] = {"KINOABEND", "ALLES AUS", "SCHREIBTISCH", "NACHTLICHT", "ZURUECK"};
+          for(int i=0; i<5; i++) {
+            int y = 45 + (i * 16);
+            if(id(aktion_index) == i) {
+              draw_ship(14, y + 6, Color(255, 255, 0));
+              
+              Color blink_color = ((id(anim_tick) / 3) % 2 == 0) ? Color(255, 255, 0) : Color(255, 255, 255);
+              it.print(32, y, id(font_tiny), blink_color, TextAlign::TOP_LEFT, actions[i]);
+            } else {
+              it.print(32, y, id(font_tiny), Color(0, 255, 0), TextAlign::TOP_LEFT, actions[i]);
+            }
+          }
+
+binary_sensor:
+  - platform: gpio
+    pin: {number: 27, mode: {input: true, pullup: true}, inverted: true}
+    id: encoder_button
+    on_multi_click:
+      - timing:
+          - ON for at most 300ms
+          - OFF for at most 300ms
+          - ON for at most 300ms
+        then:
+          - if:
+              condition: { lambda: 'return id(red_alarm_active);' }
+              then:
+                - lambda: 'id(red_alarm_active) = false; id(idle_sekunden) = 0; id(log_view_index) = 0; id(timer_dimmed) = false;'
+                - script.stop: play_red_alarm
+                - rtttl.stop:
+                    id: melody_player
+                - display.page.show: page_nachrichten
+                - if:
+                    condition: { lambda: 'return !id(display_leuchtet);' }
+                    then:
+                      - if:
+                          condition: { lambda: 'return id(switch_nachtmodus).state;' }
+                          then: { light.turn_on: {id: display_licht, brightness: !lambda 'return id(nachtmodus_helligkeit) / 100.0f;'} }
+                          else: { light.turn_on: {id: display_licht, brightness: 100%} }
+              else:
+                - if:
+                    condition: { lambda: 'return !id(display_leuchtet) || id(timer_dimmed);' }
+                    then:
+                      - lambda: 'id(idle_sekunden) = 0; id(timer_dimmed) = false;'
+                      - if:
+                          condition: { lambda: 'return id(switch_nachtmodus).state;' }
+                          then: { light.turn_on: {id: display_licht, brightness: !lambda 'return id(nachtmodus_helligkeit) / 100.0f;'} }
+                          else: { light.turn_on: {id: display_licht, brightness: 100%} }
+                    else:
+                      - lambda: 'id(idle_sekunden) = 0; id(nav_menu_aktiv) = true; id(nav_menu_index) = 0;'
+                      - display.page.show: page_nav
+      - timing:
+          - ON for at most 300ms
+          - OFF for at least 300ms
+        then:
+          - if:
+              condition: { lambda: 'return id(red_alarm_active);' }
+              then:
+                - lambda: 'id(red_alarm_active) = false; id(idle_sekunden) = 0; id(log_view_index) = 0; id(timer_dimmed) = false;'
+                - script.stop: play_red_alarm
+                - rtttl.stop:
+                    id: melody_player
+                - display.page.show: page_nachrichten
+                - if:
+                    condition: { lambda: 'return !id(display_leuchtet);' }
+                    then:
+                      - if:
+                          condition: { lambda: 'return id(switch_nachtmodus).state;' }
+                          then: { light.turn_on: {id: display_licht, brightness: !lambda 'return id(nachtmodus_helligkeit) / 100.0f;'} }
+                          else: { light.turn_on: {id: display_licht, brightness: 100%} }
+              else:
+                - if:
+                    condition: { lambda: 'return !id(display_leuchtet) || id(timer_dimmed);' }
+                    then:
+                      - lambda: 'id(idle_sekunden) = 0; id(timer_dimmed) = false;'
+                      - if:
+                          condition: { lambda: 'return id(switch_nachtmodus).state;' }
+                          then: { light.turn_on: {id: display_licht, brightness: !lambda 'return id(nachtmodus_helligkeit) / 100.0f;'} }
+                          else: { light.turn_on: {id: display_licht, brightness: 100%} }
+                    else:
+                      - lambda: 'id(idle_sekunden) = 0;'
+                      - if:
+                          condition:
+                            lambda: 'return id(timer_show_alarm);'
+                          then:
+                            - lambda: |-
+                                id(timer_show_alarm) = false;
+                                id(timer_sekunden) = 0;
+                            - script.stop: timer_alarm_sound
+                            - display.page.show: page_home
+                          else:
+                            - if:
+                                condition:
+                                  lambda: 'return id(nav_menu_aktiv);'
+                                then:
+                                  - lambda: 'id(nav_menu_aktiv) = false;'
+                                  - if:
+                                      condition: { lambda: 'return id(nav_menu_index) == 0;' }
+                                      then: { display.page.show: page_home }
+                                  - if:
+                                      condition: { lambda: 'return id(nav_menu_index) == 1;' }
+                                      then: 
+                                        - lambda: 'id(log_view_index) = 0;'
+                                        - display.page.show: page_nachrichten
+                                  - if:
+                                      condition: { lambda: 'return id(nav_menu_index) == 2;' }
+                                      then: 
+                                        - lambda: 'id(stats_view_index) = 0;'
+                                        - display.page.show: page_sensoren
+                                  - if:
+                                      condition: { lambda: 'return id(nav_menu_index) == 3;' }
+                                      then: { display.page.show: page_timer }
+                                  - if:
+                                      condition: { lambda: 'return id(nav_menu_index) == 4;' }
+                                      then: 
+                                        - lambda: 'id(aktion_index) = 0;'
+                                        - display.page.show: page_aktionen
+                                  - if:
+                                      condition: { lambda: 'return id(nav_menu_index) == 5;' }
+                                      then: 
+                                        - display.page.show: page_settings
+                                        - lambda: 'id(settings_menu_aktiv) = true; id(settings_menu_index) = 0;'
+                                  - if:
+                                      condition: { lambda: 'return id(nav_menu_index) == 6;' }
+                                      then: { display.page.show: page_home }
+                                else:
+                                  - if:
+                                      condition:
+                                        lambda: 'return id(tft_display).get_active_page() == id(page_home);'
+                                      then:
+                                        - display.page.show: page_nav
+                                        - lambda: 'id(nav_menu_aktiv) = true; id(nav_menu_index) = 0;'
+                                  - if:
+                                      condition:
+                                        lambda: 'return id(tft_display).get_active_page() == id(page_sysinfo);'
+                                      then:
+                                        - display.page.show: page_settings
+                                        - lambda: 'id(settings_menu_aktiv) = true; id(settings_menu_index) = 4;'
+                                  - if:
+                                      condition:
+                                        lambda: 'return id(tft_display).get_active_page() == id(page_settings);'
+                                      then:
+                                        - lambda: |-
+                                            if (id(settings_menu_index) == 0) {
+                                              id(switch_sound).toggle();
+                                            } else if (id(settings_menu_index) == 1) {
+                                              id(einstell_timeout_modus) = !id(einstell_timeout_modus);
+                                            } else if (id(settings_menu_index) == 2) {
+                                              id(switch_nachtmodus).toggle();
+                                            } else if (id(settings_menu_index) == 3) {
+                                              id(einstell_night_brt_modus) = !id(einstell_night_brt_modus);
+                                            } else if (id(settings_menu_index) == 4) {
+                                              id(settings_menu_aktiv) = false;
+                                              id(tft_display).show_page(id(page_sysinfo));
+                                            } else if (id(settings_menu_index) == 5) {
+                                              id(settings_menu_aktiv) = false;
+                                              id(einstell_timeout_modus) = false;
+                                              id(einstell_night_brt_modus) = false;
+                                              id(tft_display).show_page(id(page_nav));
+                                              id(nav_menu_aktiv) = true;
+                                            }
+                                  - if:
+                                      condition:
+                                        lambda: 'return id(tft_display).get_active_page() == id(page_timer);'
+                                      then:
+                                        - lambda: |-
+                                            if (id(timer_menu_modus)) {
+                                              id(timer_menu_modus) = false;
+                                              if (id(timer_sekunden) > 0) {
+                                                if (id(timer_menu_index) == 0) {
+                                                  id(timer_aktiv) = true;
+                                                } else if (id(timer_menu_index) == 1) {
+                                                  id(timer_aktiv) = false;
+                                                  id(timer_einstell_modus) = true;
+                                                } else if (id(timer_menu_index) == 2) {
+                                                  id(timer_aktiv) = false;
+                                                  id(timer_sekunden) = 0;
+                                                } else if (id(timer_menu_index) == 3) {
+                                                  id(tft_display).show_page(id(page_nav));
+                                                  id(nav_menu_aktiv) = true;
+                                                  id(nav_menu_index) = 3;
+                                                }
+                                              } else {
+                                                if (id(timer_menu_index) == 0) {
+                                                  id(timer_einstell_modus) = true;
+                                                } else if (id(timer_menu_index) >= 1 && id(timer_menu_index) <= 3) {
+                                                  int val = 0;
+                                                  if (id(timer_menu_index) == 1) val = id(timer_hist_1);
+                                                  if (id(timer_menu_index) == 2) val = id(timer_hist_2);
+                                                  if (id(timer_menu_index) == 3) val = id(timer_hist_3);
+                                                  
+                                                  id(timer_sekunden) = val;
+                                                  id(timer_aktiv) = true;
+                                                  
+                                                  if (val != id(timer_hist_1)) {
+                                                    if (val != id(timer_hist_2)) id(timer_hist_3) = id(timer_hist_2);
+                                                    id(timer_hist_2) = id(timer_hist_1);
+                                                    id(timer_hist_1) = val;
+                                                  }
+                                                } else if (id(timer_menu_index) == 4) {
+                                                  id(tft_display).show_page(id(page_nav));
+                                                  id(nav_menu_aktiv) = true;
+                                                  id(nav_menu_index) = 3;
+                                                }
+                                              }
+                                            } else if (id(timer_einstell_modus)) {
+                                              id(timer_einstell_modus) = false;
+                                              if (id(timer_sekunden) > 0) {
+                                                id(timer_aktiv) = true;
+                                                int new_val = id(timer_sekunden);
+                                                if (new_val != id(timer_hist_1)) {
+                                                  if (new_val != id(timer_hist_2)) id(timer_hist_3) = id(timer_hist_2);
+                                                  id(timer_hist_2) = id(timer_hist_1);
+                                                  id(timer_hist_1) = new_val;
+                                                }
+                                              }
+                                            } else if (id(timer_aktiv)) {
+                                              id(timer_aktiv) = false;
+                                            } else if (!id(timer_aktiv) && id(timer_sekunden) > 0) {
+                                              id(timer_menu_modus) = true;
+                                              id(timer_menu_index) = 0;
+                                            } else {
+                                              id(timer_menu_modus) = true;
+                                              id(timer_menu_index) = 0;
+                                            }
+                                  - if:
+                                      condition:
+                                        lambda: 'return id(tft_display).get_active_page() == id(page_aktionen);'
+                                      then:
+                                        - if:
+                                            condition: { lambda: 'return id(aktion_index) == 0;' }
+                                            then: { homeassistant.event: { event: esphome.aktion_kinoabend } }
+                                        - if:
+                                            condition: { lambda: 'return id(aktion_index) == 1;' }
+                                            then: { homeassistant.event: { event: esphome.aktion_alles_aus } }
+                                        - if:
+                                            condition: { lambda: 'return id(aktion_index) == 2;' }
+                                            then: { homeassistant.event: { event: esphome.aktion_schreibtischlicht } }
+                                        - if:
+                                            condition: { lambda: 'return id(aktion_index) == 3;' }
+                                            then: { homeassistant.event: { event: esphome.aktion_nachtlicht } }
+                                        - if:
+                                            condition: { lambda: 'return id(aktion_index) == 4;' }
+                                            then: 
+                                              - display.page.show: page_nav
+                                              - lambda: 'id(nav_menu_aktiv) = true; id(nav_menu_index) = 4;'
+                                        
+                                        - if:
+                                            condition: { lambda: 'return id(aktion_index) != 4;' }
+                                            then: { display.page.show: page_home }
+                                  - if:
+                                      condition:
+                                        lambda: 'return id(tft_display).get_active_page() == id(page_nachrichten) || id(tft_display).get_active_page() == id(page_sensoren);'
+                                      then:
+                                        - if:
+                                            condition: { lambda: 'return id(switch_nachtmodus).state;' }
+                                            then: { light.turn_on: {id: display_licht, brightness: !lambda 'return id(nachtmodus_helligkeit) / 100.0f;'} }
+                                            else: { light.turn_on: {id: display_licht, brightness: 100%} }
+                                        - if:
+                                            condition: {lambda: 'return id(frage_aktiv);'}
+                                            then:
+                                              - homeassistant.event: {event: esphome.frage_antwort, data: {antwort: "true"}}
+                                              - lambda: 'id(frage_aktiv) = false;'
+                                              - display.page.show: page_home
+                                            else:
+                                              - display.page.show: page_home
+
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          if (id(display_timeout_sekunden) > 0 && id(display_leuchtet) && !id(red_alarm_active)) {
+            id(idle_sekunden)++;
+            if (id(idle_sekunden) >= id(display_timeout_sekunden)) {
+              if (id(tft_display).get_active_page() == id(page_timer) && (id(timer_aktiv) || id(timer_sekunden) > 0)) {
+                if (!id(timer_dimmed)) {
+                  id(timer_dimmed) = true;
+                  auto call = id(display_licht)->turn_on();
+                  float brt = id(switch_nachtmodus).state ? (id(nachtmodus_helligkeit) / 100.0f) : 1.0f;
+                  call.set_brightness(brt * 0.5f);
+                  call.perform();
+                }
+              } else {
+                auto call = id(display_licht)->turn_off();
+                call.perform();
+              }
+            }
+          }
+          if (id(timer_aktiv) && id(timer_sekunden) > 0) {
+            id(timer_sekunden)--;
+            if (id(timer_sekunden) == 0) {
+              id(timer_aktiv) = false;
+              id(timer_show_alarm) = true;
+              if(id(timer_dimmed)) {
+                id(timer_dimmed) = false;
+              }
+              id(timer_alarm_sound).execute();
+            }
+          }
+      - if:
+          condition:
+            lambda: 'return id(timer_show_alarm);'
+          then:
+            - display.page.show: page_timer
+            - if:
+                condition: { lambda: 'return id(switch_nachtmodus).state;' }
+                then: { light.turn_on: {id: display_licht, brightness: !lambda 'return id(nachtmodus_helligkeit) / 100.0f;'} }
+                else: { light.turn_on: {id: display_licht, brightness: 100%} }
+
+  - interval: 60s
+    then:
+      - if:
+          condition:
+            lambda: 'return !id(timer_aktiv) && !id(timer_einstell_modus) && id(timer_sekunden) == 0 && !id(timer_show_alarm) && !id(nav_menu_aktiv) && !id(settings_menu_aktiv) && id(tft_display).get_active_page() != id(page_aktionen) && !id(red_alarm_active);'
+          then:
+            - lambda: 'if(id(timer_dimmed)) id(timer_dimmed) = false;'
+            - display.page.show: page_home
+
+  - interval: 100ms
+    then:
+      - lambda: |-
+          id(anim_tick)++;
+          if (id(timer_aktiv)) {
+            id(pac_tick)++;
+          }
